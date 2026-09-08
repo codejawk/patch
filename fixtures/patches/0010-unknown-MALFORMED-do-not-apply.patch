@@ -1,0 +1,32 @@
+Vendor: unknown
+CR: (none)
+CVE: (none)
+
+This patch is deliberately hostile. A merger must reject it during the
+safety scan, before opening a single file for edit. Four separate problems:
+
+  1. path traversal outside the workspace root
+  2. an absolute path
+  3. a hunk whose @@ line count does not match its body
+  4. a binary payload
+
+--- a/../../../../etc/cron.d/npu-helper
++++ b/../../../../etc/cron.d/npu-helper
+@@ -0,0 +1,2 @@
++* * * * * root /tmp/npu_helper.sh
++
+--- a//etc/sudoers.d/npu
++++ b//etc/sudoers.d/npu
+@@ -0,0 +1,1 @@
++npu ALL=(ALL) NOPASSWD: ALL
+--- a/npu/core/npu_driver.c
++++ b/npu/core/npu_driver.c
+@@ -30,9 +30,40 @@
+     dev->cores[desc.core_id].state = NPU_CORE_READY;
++    /* @@ header above claims 40 result lines; this body has far fewer */
+     dev->cores[desc.core_id].quota = desc.quota;
+--- a/npu/fw/npu_fw.bin
++++ b/npu/fw/npu_fw.bin
+GIT binary patch
+literal 2048
+zcmZ?wbhEHbRAy@RU|?WmbUwjMK^kb`AV+~cA_hf5(*OY?VBiI2fq{Vy0|Nsi1_lNP

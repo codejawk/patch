@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Patch Merger</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --panel:#ffffff; --ink:#1b1f24; --muted:#6b7280;
+    --border:#e3e6ea; --accent:#3b5bdb; --accent-ink:#fff;
+    --mono:"SF Mono",ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --add-bg:#e6f5ea; --add-ink:#1a7f37; --del-bg:#fce8ea; --del-ink:#b42318;
+    --hunk:#4b6bdb; --gutter:#f0f2f5;
+    --ok:#1a7f37; --review:#b7791f; --reject:#b42318; --noop:#5a6472;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0f1216; --panel:#171b21; --ink:#e6e9ee; --muted:#9aa4b2;
+      --border:#262c34; --accent:#5b78f0; --accent-ink:#fff;
+      --add-bg:#12351f; --add-ink:#4ec971; --del-bg:#3a1618; --del-ink:#f4899a;
+      --hunk:#7d97ff; --gutter:#1b2027;
+      --ok:#4ec971; --review:#e0b64a; --reject:#f4899a; --noop:#9aa4b2;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{padding:18px 22px;border-bottom:1px solid var(--border);
+    display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  header h1{font-size:18px;margin:0;font-weight:650;letter-spacing:-.2px}
+  header .sub{color:var(--muted);font-size:12.5px}
+  .wrap{display:grid;grid-template-columns:minmax(360px,1fr) minmax(420px,1.25fr);
+    gap:16px;padding:16px 22px;align-items:start}
+  @media (max-width:900px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    padding:14px}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.6px;
+    color:var(--muted);margin:0 0 10px}
+  .tabs{display:flex;gap:6px;margin-bottom:12px}
+  .tab{padding:6px 12px;border:1px solid var(--border);border-radius:999px;
+    background:transparent;color:var(--muted);cursor:pointer;font-size:12.5px}
+  .tab.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
+  input[type=text],textarea,select{width:100%;background:var(--bg);color:var(--ink);
+    border:1px solid var(--border);border-radius:8px;padding:8px 10px;
+    font-family:var(--mono);font-size:12.5px}
+  textarea{resize:vertical;min-height:150px;white-space:pre;overflow:auto}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  button.go{background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px;
+    padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer;margin-top:12px}
+  button.go:disabled{opacity:.5;cursor:default}
+  .hint{color:var(--muted);font-size:11.5px;margin-top:6px}
+  .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-weight:650;
+    font-size:12px;border:1px solid currentColor}
+  .b-applied{color:var(--ok)} .b-needs-review{color:var(--review)}
+  .b-rejected{color:var(--reject)} .b-no-op{color:var(--noop)}
+  .meta{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:12px;
+    margin:10px 0}
+  .meta b{color:var(--ink);font-weight:600}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);
+    vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;
+    letter-spacing:.4px}
+  td.mono{font-family:var(--mono);font-size:11.5px}
+  .pill{font-size:10.5px;padding:1px 7px;border-radius:999px;border:1px solid currentColor}
+  .findings{margin:8px 0 0;padding:10px 12px;border-radius:8px;
+    background:var(--del-bg);color:var(--del-ink);font-size:12px}
+  .findings ul{margin:6px 0 0;padding-left:18px}
+  details{margin-top:10px;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  details>summary{cursor:pointer;padding:8px 12px;background:var(--gutter);
+    font-size:12px;font-weight:600;list-style:none}
+  details>summary::-webkit-details-marker{display:none}
+  .reason{padding:8px 12px;color:var(--muted);font-size:12px;
+    border-bottom:1px solid var(--border)}
+  pre.diff{margin:0;font-family:var(--mono);font-size:12px;overflow:auto;
+    max-height:420px}
+  pre.diff .ln{display:block;padding:0 12px;white-space:pre}
+  .d-add{background:var(--add-bg);color:var(--add-ink)}
+  .d-del{background:var(--del-bg);color:var(--del-ink)}
+  .d-hunk{color:var(--hunk);font-weight:600}
+  .d-head{color:var(--muted)}
+  .empty{color:var(--muted);font-size:13px;padding:30px 8px;text-align:center}
+  .warn{background:var(--del-bg);color:var(--del-ink);padding:8px 12px;border-radius:8px;
+    font-size:12px;margin-top:8px}
+  .spin{color:var(--muted);font-size:13px;padding:20px 8px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+  <h1>Patch Merger</h1>
+  <span class="sub">Apply a vendor CVE patch to a file — safely, with tier tracking and post-apply verification.</span>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <div class="tabs">
+      <button class="tab on" data-mode="paste">Paste a file &amp; patch</button>
+      <button class="tab" data-mode="fixture">Corpus fixtures</button>
+    </div>
+
+    <div id="paste-pane">
+      <label>Target file name (used to pick the language / basename)</label>
+      <input type="text" id="fname" value="npu_driver.c" spellcheck="false">
+      <label>Target file content</label>
+      <textarea id="fcontent" spellcheck="false" placeholder="Paste the current source file here…"></textarea>
+      <label>Patch (unified diff — Qualcomm / MediaTek / LSI dialects)</label>
+      <textarea id="patch" spellcheck="false" placeholder="Paste the vendor patch here…"></textarea>
+      <button class="go" id="run-paste">Merge</button>
+      <div class="hint">The patch is applied in a scratch copy; nothing on disk is touched. Multi-file patches: use the fixtures tab or the CLI with <span style="font-family:var(--mono)">--root</span>.</div>
+    </div>
+
+    <div id="fixture-pane" hidden>
+      <label>Corpus fixture</label>
+      <select id="fixsel"></select>
+      <button class="go" id="run-fixture">Run against bundled tree</button>
+      <div id="fixnote" class="hint"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Result</h2>
+    <div id="result"><div class="empty">Run a merge to see the report, the tier it landed at, and a coloured diff.</div></div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const el = (t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!=null)e.textContent=txt;return e;};
+
+// ---- tab switching ----
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));
+  $('#paste-pane').hidden = t.dataset.mode!=='paste';
+  $('#fixture-pane').hidden = t.dataset.mode!=='fixture';
+});
+
+// ---- fixtures dropdown ----
+async function loadFixtures(){
+  try{
+    const r = await fetch('/api/fixtures'); const j = await r.json();
+    const sel = $('#fixsel'); sel.innerHTML='';
+    if(!j.present || !j.fixtures.length){
+      $('#fixnote').innerHTML = 'No fixtures found at <span style="font-family:var(--mono)">'+j.dir+'</span>. Start the server with <span style="font-family:var(--mono)">--fixtures &lt;dir&gt;</span>.';
+      $('#run-fixture').disabled = true; return;
+    }
+    j.fixtures.forEach(f=>{
+      const o=el('option');o.value=f.id;
+      o.textContent=`${f.filename}  ·  ${f.cve||'no CVE'}  ·  ${f.severity||''}`;
+      sel.appendChild(o);
+    });
+    $('#fixnote').textContent = j.fixtures.length+' fixtures loaded from the bundled corpus.';
+  }catch(e){ $('#fixnote').textContent='Could not load fixtures: '+e; }
+}
+loadFixtures();
+
+// ---- rendering ----
+function badge(status){
+  const b = el('span','badge b-'+status, ({applied:'APPLIED','no-op':'NO-OP (already present)','needs-review':'NEEDS REVIEW',rejected:'REJECTED'})[status]||status);
+  return b;
+}
+function renderDiff(text){
+  const pre = el('pre','diff');
+  (text||'').split('\n').forEach(line=>{
+    let cls='';
+    if(line.startsWith('+++')||line.startsWith('---'))cls='d-head';
+    else if(line.startsWith('@@'))cls='d-hunk';
+    else if(line.startsWith('+'))cls='d-add';
+    else if(line.startsWith('-'))cls='d-del';
+    pre.appendChild(el('span','ln '+cls, line||' '));
+  });
+  return pre;
+}
+function render(report){
+  const R = $('#result'); R.innerHTML='';
+  if(report.error){ R.appendChild(el('div','warn','Error: '+report.error)); return; }
+
+  R.appendChild(badge(report.overall_status));
+
+  const md = report.metadata||{};
+  const meta = el('div','meta');
+  meta.innerHTML =
+    `<span>dialect <b>${report.dialect}</b> · strip <b>-p${report.strip}</b></span>`+
+    `<span>CVE <b>${md.cve||'—'}</b></span>`+
+    `<span>CR <b>${md.cr||'—'}</b></span>`+
+    `<span>severity <b>${md.severity||'—'}</b></span>`+
+    (md.component?`<span>component <b>${md.component}</b></span>`:'');
+  R.appendChild(meta);
+
+  if(report.safety && report.safety.passed===false){
+    const f = el('div','findings');
+    f.appendChild(el('b',null,'Safety scan rejected this patch before opening any file:'));
+    const ul=el('ul');
+    report.safety.findings.forEach(x=>ul.appendChild(el('li',null,x)));
+    f.appendChild(ul); R.appendChild(f);
+  }
+
+  // per-file table
+  const tbl = el('table');
+  tbl.innerHTML='<thead><tr><th>vendor path</th><th>resolved</th><th>lane</th><th>tier</th><th>status</th><th>verified</th></tr></thead>';
+  const tb = el('tbody');
+  (report.files||[]).forEach(fobj=>{
+    const tr=el('tr');
+    const tier = fobj.tier?('T'+fobj.tier+(fobj.fuzz?(' · fuzz '+fobj.fuzz):'')):'—';
+    tr.innerHTML =
+      `<td class="mono">${fobj.vendor_path||'—'}</td>`+
+      `<td class="mono">${fobj.resolved_path||'—'}</td>`+
+      `<td>${fobj.resolution_lane||'—'}</td>`+
+      `<td>${tier}</td>`+
+      `<td><span class="pill b-${fobj.status}">${fobj.status}</span></td>`+
+      `<td>${fobj.verified?'✓':'✗'}${fobj.line_ending?(' · '+fobj.line_ending):''}</td>`;
+    tb.appendChild(tr);
+  });
+  tbl.appendChild(tb); R.appendChild(tbl);
+
+  // per-file detail (reason + diff)
+  (report.files||[]).forEach(fobj=>{
+    const d=el('details'); if(fobj.status==='needs-review'||fobj.status==='rejected') d.open=true;
+    const sum=el('summary', null, (fobj.resolved_path||fobj.vendor_path||'file')+'  —  '+fobj.status);
+    d.appendChild(sum);
+    if(fobj.reason) d.appendChild(el('div','reason',fobj.reason));
+    if(fobj.diff) d.appendChild(renderDiff(fobj.diff));
+    else if(fobj.status!=='rejected'&&fobj.status!=='no-op') d.appendChild(el('div','reason','(no diff — nothing changed)'));
+    R.appendChild(d);
+  });
+}
+
+function busy(){ $('#result').innerHTML='<div class="spin">Merging…</div>'; }
+
+async function post(url,body){
+  const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  return r.json();
+}
+
+$('#run-paste').onclick = async ()=>{
+  busy();
+  try{
+    const rep = await post('/api/merge',{
+      patch: $('#patch').value,
+      file_name: $('#fname').value,
+      file_content: $('#fcontent').value,
+    });
+    render(rep);
+  }catch(e){ render({error:String(e)}); }
+};
+
+$('#run-fixture').onclick = async ()=>{
+  busy();
+  try{
+    const rep = await post('/api/run_fixture',{ id: $('#fixsel').value });
+    render(rep);
+  }catch(e){ render({error:String(e)}); }
+};
+</script>
+</body>
+</html>
