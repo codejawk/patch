@@ -914,6 +914,17 @@ def main(argv=None):
     ap.add_argument("--out", help="write merged files under this directory")
     ap.add_argument("--json", action="store_true",
                     help="print the JSON report only")
+    ap.add_argument("--html", nargs="?", const="", default=None,
+                    metavar="PATH",
+                    help="write the visual review page to PATH (default: a temp "
+                         "file). A review page is generated on every run unless "
+                         "--json is used alone.")
+    ap.add_argument("--open", action="store_true", dest="open_page",
+                    help="(default) open the review page in the browser")
+    ap.add_argument("--no-open", action="store_true", dest="no_open",
+                    help="generate the review page but do NOT open a browser")
+    ap.add_argument("--findings", help="JSON file of reviewer findings to embed "
+                    "in the review page: [{severity,title,body,evidence}]")
     args = ap.parse_args(argv)
 
     with open(args.patch, "r", encoding="utf-8", errors="replace") as fh:
@@ -930,6 +941,18 @@ def main(argv=None):
         ap.error("provide --file <target> or --root <tree>")
 
     report, writes = merge_patch(patch_text, root, forced_target)
+    report["patch_filename"] = os.path.basename(args.patch)
+
+    # ---- visual review page (generated + opened by default) ----
+    # Render BEFORE write-back so the "Before" side reads the pre-patch file,
+    # even when --in-place is about to overwrite it in the tree.
+    html_path = None
+    make_html = (args.html is not None) or (not args.json)
+    if make_html:
+        html_path = _write_review(report, writes, patch_text, root, args)
+        if html_path and not args.no_open and not args.json:
+            import webbrowser
+            webbrowser.open("file://" + os.path.abspath(html_path))
 
     # write-back
     wrote = []
@@ -964,8 +987,129 @@ def main(argv=None):
             print(f"\n(no files written — status is "
                   f"'{report['overall_status']}')", file=sys.stderr)
 
+    if html_path:
+        print(f"\nreview page: {html_path}", file=sys.stderr)
+
     exit_map = {"applied": 0, "no-op": 0, "needs-review": 2, "rejected": 3}
     return exit_map.get(report["overall_status"], 1)
+
+
+def render_review(report, writes, patch_text, root, findings=None):
+    """Build the per-file payload (current / merged / incoming) for the 3-way
+    conflict view and return the rendered HTML page. Reusable by the CLI and by
+    batch mode. If findings is None, auto-detected blockers are used."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import review
+
+    # raw vendor patch text per file, shown as the "Patch" panel
+    patch_by_file = {}
+    _pre, sections = parse_patch(patch_text)
+    for s in sections:
+        vp = _safe_vp(s)
+        if not vp:
+            continue
+        lines = []
+        for h in s.hunks:
+            lines.append(h.header)
+            lines.extend(h.lines)
+        if lines:
+            patch_by_file[vp] = "\n".join(lines[:200])
+
+    payload = {}
+    for e in report["files"]:
+        vp = e["vendor_path"]
+        rp = e["resolved_path"]
+        current = None
+        if rp and os.path.isfile(os.path.join(root, rp)):
+            current = to_lf(_read(os.path.join(root, rp))).decode("utf-8", "replace")
+        merged = None
+        if rp and rp in writes:
+            merged = to_lf(writes[rp]).decode("utf-8", "replace")
+        payload[vp] = {"current": current, "merged": merged,
+                       "patch": patch_by_file.get(vp)}
+
+    if findings is None:
+        findings = _auto_findings(report, patch_text, root) or None
+    return review.render(report, payload=payload, findings=findings)
+
+
+def _write_review(report, writes, patch_text, root, args):
+    """CLI wrapper: render the review page, write it to disk, return its path."""
+    import tempfile
+    findings = None
+    if args.findings:
+        with open(args.findings, encoding="utf-8") as fh:
+            findings = json.load(fh)
+    page = render_review(report, writes, patch_text, root, findings=findings)
+
+    path = args.html
+    if not path:  # --html with no path, or default run
+        fd, path = tempfile.mkstemp(prefix="patch-review-", suffix=".html")
+        os.close(fd)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(page)
+    return path
+
+
+def _tree_text(root, _cache={}):
+    if root in _cache:
+        return _cache[root]
+    buf = []
+    for dp, _dn, fns in os.walk(root):
+        if ".git" in dp.split(os.sep):
+            continue
+        for fn in fns:
+            try:
+                buf.append(_read(os.path.join(dp, fn)).decode("utf-8", "replace"))
+            except OSError:
+                pass
+    text = "\n".join(buf)
+    _cache[root] = text
+    return text
+
+
+def _auto_findings(report, patch_text, root):
+    """Cheap, false-positive-averse static checks for a suspect/rejected merge:
+    flag project-local helpers the added code calls that don't exist anywhere in
+    the target tree (a link error the patch carries in with it)."""
+    if report.get("overall_status") not in ("needs-review", "rejected"):
+        return []
+
+    # derive the project's symbol prefix from a resolved basename, e.g. "npu_"
+    prefix = None
+    for e in report["files"]:
+        base = os.path.basename(e.get("resolved_path") or e.get("vendor_path") or "")
+        if "_" in base:
+            prefix = base.split("_", 1)[0] + "_"
+            break
+    if not prefix:
+        return []
+
+    _pre, sections = parse_patch(patch_text)
+    called = set()
+    for s in sections:
+        for h in s.hunks:
+            for ln in h.lines:
+                if ln.startswith("+"):
+                    for m in re.finditer(r"\b([A-Za-z_]\w*)\s*\(", ln[1:]):
+                        called.add(m.group(1))
+
+    tree = _tree_text(root)
+    findings = []
+    for fn in sorted(called):
+        if not fn.startswith(prefix):
+            continue  # only project-local symbols — kernel/libc APIs aren't here
+        if not re.search(r"\b" + re.escape(fn) + r"\s*\(", tree):
+            findings.append({
+                "severity": "dep",
+                "title": f"Calls {fn}(), which isn't in this tree",
+                "body": (f"The added code calls {fn}(), but nothing under the "
+                         f"target tree defines or declares it. As it stands the "
+                         f"change won't link — this helper has to be sourced from "
+                         f"the rest of the vendor series before it can build."),
+                "evidence": f"grep -rn '{fn}' <tree>  ->  only the patch itself",
+            })
+    return findings
 
 
 if __name__ == "__main__":
