@@ -59,6 +59,60 @@ It prints a per-file JSON report and, unless `--json` is used alone, **writes a
 visual review page and opens it in the browser** (add `--no-open` to generate it
 without opening). Exit codes: `0` applied/no-op, `2` needs-review, `3` rejected.
 
+### AI-assisted merge — `claude_merge.py`
+
+For the judgment calls the deterministic tiers can't make, use `claude_merge.py`.
+It runs the exact same safe merge, but when the result is **needs-review** or
+**rejected** it shells out to the local `claude` CLI to (1) list the concrete
+defects that make the fuzzy/failed landing unsafe, and (2) propose a corrected
+rebase against the *current* code — which it then **re-verifies with git apply**
+(the rebase must actually apply, or it's shown as an unverified draft). Applied /
+no-op results never invoke the model (deterministic by default). The proposal is
+a review request, never auto-applied.
+
+```bash
+python3 scripts/claude_merge.py <patch> --file <target>     # single file
+python3 scripts/claude_merge.py <patch> --root <tree>       # tree
+python3 scripts/claude_merge.py <patch> --file <target> --in-place   # write clean results
+python3 scripts/claude_merge.py <patch> --file <target> --no-assist  # skip the model
+python3 scripts/claude_merge.py <patch> --file <target> --model opus # pick a model
+```
+
+Requires the `claude` CLI on PATH. The report gains the AI blockers as cards and
+an "AI-assisted rebase" section with a ✓verified / ✗draft badge.
+
+### Perforce, merged like a person — `p4_merge.py`
+
+A **separate** tool for a real p4 workspace, where the vendor patch was written
+against a different revision so its `@@` line numbers are almost always wrong. It
+does **not** run the mechanical tiers. Instead it does what an engineer does:
+
+1. **Prepare the workspace / changelist** — `p4 where` (is the path mapped to your
+   client? if not, it stops and says so), then `p4 revert` (discard pending edits),
+   `p4 sync` (latest), `p4 edit` (open in your CL). It **never runs `p4 submit`** —
+   the changelist is left open for you to review and submit.
+2. **Locate by content, not line number** — each hunk's context + removed lines
+   are matched (whitespace-insensitively) against the current file to find where
+   the change belongs, even if it moved.
+3. **Let the Claude CLI make the edit** — given the current file, the located
+   region, and the vendor hunk. It writes the merged file back into the opened
+   file (preserving the original line ending) and shows a P4-style before|after
+   diff plus raw `p4 diff`.
+
+```bash
+python3 scripts/p4_merge.py <patch> --path //depot/proj/npu/npu_auth.c  # one mapped file
+python3 scripts/p4_merge.py <patch> --path /local/abs/npu_auth.c        # a local file
+python3 scripts/p4_merge.py <patch> --dir  //depot/proj/npu/...         # folder: files from the patch
+python3 scripts/p4_merge.py <patch> --path <f> --model sonnet           # pick a model
+python3 scripts/p4_merge.py <patch> --path <f> --no-p4                  # skip p4, merge locally
+```
+
+Requires the `claude` CLI. `p4` is optional — with `--no-p4` (or when `p4` isn't
+on PATH) it merges the local file in place, so you can dry-run outside the office.
+Unlike `claude_merge.py` (which proposes a *diff* you apply), this one edits the
+opened file directly — safe because the change sits in an open p4 changelist you
+review with `p4 diff` and submit yourself; nothing is ever submitted for you.
+
 ### Many patches at once — batch mode
 
 When the user points at a **folder of patches** (or asks "which of these merge?",
@@ -210,15 +264,23 @@ python3 scripts/merge.py <patch> --root <tree> --html review.html \
 4. **Never** hand-edit the file to "make the patch fit" and call it applied.
    If it doesn't land cleanly, it's `needs-review` or `rejected` — say so.
 
-## Web UI
+## App (web UI)
 
-For an interactive view (paste a file + patch, or run any bundled corpus
-fixture and watch the tiers, the diff, and the safety rejects):
+For a point-and-click app instead of the CLI — a two-pane window: every patch
+listed with its CVE/severity on the left, the full P4-style report rendered
+inline on the right. Preview a merge (no writes), Apply a clean one, toggle
+**AI-assist** (routes conflicts through `claude_merge`) and **write (apply)**,
+or **Run all** for the batch summary.
 
 ```bash
-python3 scripts/server.py            # http://127.0.0.1:8765
-python3 scripts/server.py --fixtures /path/to/patch-merger-fixtures
+python3 scripts/server.py                          # http://127.0.0.1:8765
+python3 scripts/server.py --tree <dir> --patches <dir>   # prefill the paths
+python3 scripts/server.py --port 9000
 ```
+
+Launch it when the user asks for "an app / a UI / a window" rather than a
+one-off run. It prefills the corpus paths and disables AI-assist if the `claude`
+CLI isn't on PATH.
 
 ## Scope / limits
 

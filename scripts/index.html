@@ -4,252 +4,345 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Patch Merger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
 <style>
   :root{
-    --bg:#f6f7f9; --panel:#ffffff; --ink:#1b1f24; --muted:#6b7280;
-    --border:#e3e6ea; --accent:#3b5bdb; --accent-ink:#fff;
-    --mono:"SF Mono",ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
-    --add-bg:#e6f5ea; --add-ink:#1a7f37; --del-bg:#fce8ea; --del-ink:#b42318;
-    --hunk:#4b6bdb; --gutter:#f0f2f5;
-    --ok:#1a7f37; --review:#b7791f; --reject:#b42318; --noop:#5a6472;
+    --bg:#eef1f5; --panel:#fff; --panel2:#f6f8fb; --ink:#152030; --muted:#5a6675;
+    --faint:#8b97a6; --line:#dbe1ea; --accent:#2f4bb0; --accent-ink:#fff;
+    --good:#1a7f4b; --good-bg:#e4f4ea; --warn:#a6690b; --warn-bg:#fbf1de;
+    --danger:#b8321f; --danger-bg:#fbe9e6; --accent-bg:#e6ebf8;
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+    --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
   }
-  @media (prefers-color-scheme:dark){
-    :root{
-      --bg:#0f1216; --panel:#171b21; --ink:#e6e9ee; --muted:#9aa4b2;
-      --border:#262c34; --accent:#5b78f0; --accent-ink:#fff;
-      --add-bg:#12351f; --add-ink:#4ec971; --del-bg:#3a1618; --del-ink:#f4899a;
-      --hunk:#7d97ff; --gutter:#1b2027;
-      --ok:#4ec971; --review:#e0b64a; --reject:#f4899a; --noop:#9aa4b2;
-    }
-  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --bg:#0d1117; --panel:#161c26; --panel2:#1c232f; --ink:#e7ecf3; --muted:#9aa7b7;
+    --faint:#66727f; --line:#28313d; --accent:#8098ff;
+    --good:#68c795; --good-bg:#132a1e; --warn:#e0ac52; --warn-bg:#2c2413;
+    --danger:#f0917f; --danger-bg:#2e1815; --accent-bg:#1e2740;
+  }}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
-  header{padding:18px 22px;border-bottom:1px solid var(--border);
-    display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
-  header h1{font-size:18px;margin:0;font-weight:650;letter-spacing:-.2px}
-  header .sub{color:var(--muted);font-size:12.5px}
-  .wrap{display:grid;grid-template-columns:minmax(360px,1fr) minmax(420px,1.25fr);
-    gap:16px;padding:16px 22px;align-items:start}
-  @media (max-width:900px){.wrap{grid-template-columns:1fr}}
-  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;
-    padding:14px}
-  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.6px;
-    color:var(--muted);margin:0 0 10px}
-  .tabs{display:flex;gap:6px;margin-bottom:12px}
-  .tab{padding:6px 12px;border:1px solid var(--border);border-radius:999px;
-    background:transparent;color:var(--muted);cursor:pointer;font-size:12.5px}
-  .tab.on{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
-  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
-  input[type=text],textarea,select{width:100%;background:var(--bg);color:var(--ink);
-    border:1px solid var(--border);border-radius:8px;padding:8px 10px;
-    font-family:var(--mono);font-size:12.5px}
-  textarea{resize:vertical;min-height:150px;white-space:pre;overflow:auto}
-  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  button.go{background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px;
-    padding:9px 16px;font-size:13px;font-weight:600;cursor:pointer;margin-top:12px}
-  button.go:disabled{opacity:.5;cursor:default}
-  .hint{color:var(--muted);font-size:11.5px;margin-top:6px}
-  .badge{display:inline-block;padding:3px 10px;border-radius:999px;font-weight:650;
-    font-size:12px;border:1px solid currentColor}
-  .b-applied{color:var(--ok)} .b-needs-review{color:var(--review)}
-  .b-rejected{color:var(--reject)} .b-no-op{color:var(--noop)}
-  .meta{display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:12px;
-    margin:10px 0}
-  .meta b{color:var(--ink);font-weight:600}
-  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
-  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--border);
-    vertical-align:top}
-  th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;
-    letter-spacing:.4px}
-  td.mono{font-family:var(--mono);font-size:11.5px}
-  .pill{font-size:10.5px;padding:1px 7px;border-radius:999px;border:1px solid currentColor}
-  .findings{margin:8px 0 0;padding:10px 12px;border-radius:8px;
-    background:var(--del-bg);color:var(--del-ink);font-size:12px}
-  .findings ul{margin:6px 0 0;padding-left:18px}
-  details{margin-top:10px;border:1px solid var(--border);border-radius:8px;overflow:hidden}
-  details>summary{cursor:pointer;padding:8px 12px;background:var(--gutter);
-    font-size:12px;font-weight:600;list-style:none}
-  details>summary::-webkit-details-marker{display:none}
-  .reason{padding:8px 12px;color:var(--muted);font-size:12px;
-    border-bottom:1px solid var(--border)}
-  pre.diff{margin:0;font-family:var(--mono);font-size:12px;overflow:auto;
-    max-height:420px}
-  pre.diff .ln{display:block;padding:0 12px;white-space:pre}
-  .d-add{background:var(--add-bg);color:var(--add-ink)}
-  .d-del{background:var(--del-bg);color:var(--del-ink)}
-  .d-hunk{color:var(--hunk);font-weight:600}
-  .d-head{color:var(--muted)}
-  .empty{color:var(--muted);font-size:13px;padding:30px 8px;text-align:center}
-  .warn{background:var(--del-bg);color:var(--del-ink);padding:8px 12px;border-radius:8px;
-    font-size:12px;margin-top:8px}
-  .spin{color:var(--muted);font-size:13px;padding:20px 8px;text-align:center}
+  [hidden]{display:none!important}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    display:flex;flex-direction:column;height:100vh;overflow:hidden}
+  header{padding:10px 20px;border-bottom:1px solid var(--line);background:var(--panel);
+    display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  header h1{font-size:16px;font-weight:700;margin:0;letter-spacing:-.2px}
+  .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{border:0;background:transparent;color:var(--muted);padding:6px 14px;
+    font-size:12.5px;font-weight:600;cursor:pointer}
+  .seg button.on{background:var(--accent);color:var(--accent-ink)}
+  .spacer{flex:1}
+  .toggle{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);
+    white-space:nowrap;cursor:pointer}
+  .toggle.off{opacity:.45}
+  .inputbar{padding:9px 20px;border-bottom:1px solid var(--line);background:var(--panel2);
+    display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .inputbar label{font-size:11px;color:var(--faint);font-family:var(--mono)}
+  .inputbar input{font-family:var(--mono);font-size:11.5px;background:var(--bg);color:var(--ink);
+    border:1px solid var(--line);border-radius:7px;padding:6px 9px;flex:1;min-width:220px}
+  button.act{font-family:var(--sans);font-weight:600;cursor:pointer;border-radius:7px;
+    border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:6px 14px;font-size:12.5px}
+  button.act.pri{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+  button.act:disabled{opacity:.5;cursor:default}
+  .main{flex:1;display:grid;grid-template-columns:1fr;min-height:0}
+  .main.folder{grid-template-columns:330px 1fr}
+  .list{border-right:1px solid var(--line);overflow-y:auto;background:var(--panel);display:none}
+  .main.folder .list{display:block}
+  .list .bar{position:sticky;top:0;background:var(--panel);border-bottom:1px solid var(--line);
+    padding:8px 12px;display:flex;gap:8px;align-items:center;z-index:1;font-size:11px;color:var(--faint)}
+  .row{padding:11px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+  .row:hover{background:var(--panel2)} .row.sel{background:var(--accent-bg)}
+  .row .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .row .name{font-family:var(--mono);font-size:11.5px;font-weight:600;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  .row .meta{font-size:11px;color:var(--faint);margin-top:3px;font-family:var(--mono)}
+  .row .acts{margin-top:8px;display:flex;gap:6px}
+  .row .acts button{padding:4px 9px;font-size:11px}
+  .badge{font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;
+    font-weight:600;padding:3px 7px;border-radius:999px;white-space:nowrap}
+  .b-applied{color:var(--good);background:var(--good-bg)}
+  .b-no-op{color:var(--accent);background:var(--accent-bg)}
+  .b-needs-review{color:var(--warn);background:var(--warn-bg)}
+  .b-rejected{color:var(--danger);background:var(--danger-bg)}
+  .b-none{color:var(--faint);border:1px solid var(--line)}
+  .view{position:relative;background:var(--bg);min-height:0}
+  iframe{width:100%;height:100%;border:0;background:var(--bg)}
+  .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    flex-direction:column;gap:10px;color:var(--faint);text-align:center;padding:30px}
+  .empty .big{font-size:15px;color:var(--muted)}
+  .spin{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+    flex-direction:column;gap:12px;background:color-mix(in srgb,var(--bg) 88%,transparent);z-index:2}
+  .spin.on{display:flex}
+  .spin .dot{width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--accent);
+    border-radius:50%;animation:sp 0.8s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .spin .msg{font-size:13px;color:var(--muted)}
+  .warnbar{background:var(--warn-bg);color:var(--warn);font-size:12px;padding:6px 20px;border-bottom:1px solid var(--line)}
+  /* live Claude terminal panel */
+  .stream{position:absolute;inset:0;background:#0b0e14;display:none;flex-direction:column;z-index:3}
+  .stream.on{display:flex}
+  .term-bar{display:flex;align-items:center;gap:8px;padding:9px 14px;background:#11151d;border-bottom:1px solid #1e2530}
+  .term-dots{display:flex;gap:6px}
+  .term-dots i{width:11px;height:11px;border-radius:50%;display:block}
+  .term-dots i:nth-child(1){background:#ff5f56} .term-dots i:nth-child(2){background:#ffbd2e} .term-dots i:nth-child(3){background:#27c93f}
+  .term-ttl{font-family:var(--mono);font-size:12px;color:#8b98a9;margin-left:6px}
+  .term-live{margin-left:auto;font-family:var(--mono);font-size:11px;color:#27c93f;display:flex;align-items:center;gap:6px}
+  .term-live.done{color:#8b98a9}
+  .term-live .p{width:8px;height:8px;border-radius:50%;background:#27c93f;animation:pulse 1s infinite}
+  .term-live.done .p{background:#8b98a9;animation:none}
+  @keyframes pulse{50%{opacity:.25}}
+  .term-x{cursor:pointer;color:#8b98a9;font-family:var(--mono);font-size:14px;padding:0 4px}
+  .term-x:hover{color:#fff}
+  .term-body{flex:1;overflow-y:auto;padding:14px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.55;color:#b9c2cf}
+  .term-cmd{color:#7fd88f;margin:12px 0 5px;white-space:pre-wrap}
+  .term-cmd:first-child{margin-top:0}
+  .term-cmd .pr{color:#5b8cff;font-weight:600}
+  .term-cmd .cm{color:#6b7686}
+  .term-in{white-space:pre-wrap;word-break:break-word;color:#5b6673;margin:2px 0 8px;
+    padding:6px 10px;border-left:2px solid #232a35;font-size:12px;max-height:150px;overflow:auto}
+  .term-out{white-space:pre-wrap;word-break:break-word;color:#aeb8c6;margin:0}
+  .term-out.active::after{content:'▋';color:#e6edf3;margin-left:1px;animation:blink 1s step-end infinite}
+  @keyframes blink{50%{opacity:0}}
+  .term-res{margin:4px 0 2px}
+  .term-res.ok{color:#27c93f} .term-res.warn{color:#e0b64a} .term-res.info{color:#5b8cff}
 </style>
 </head>
 <body>
 <header>
   <h1>Patch Merger</h1>
-  <span class="sub">Apply a vendor CVE patch to a file — safely, with tier tracking and post-apply verification.</span>
+  <div class="seg">
+    <button id="mFile" class="on" data-mode="file">Single file</button>
+    <button id="mFolder" data-mode="folder">Folder</button>
+  </div>
+  <div class="spacer"></div>
+  <label class="toggle off" id="assistToggle" title="Use the Claude CLI to analyse conflicts and propose a verified rebase">
+    <input type="checkbox" id="assist"> AI-assist
+  </label>
+  <label class="toggle" title="Preview writes nothing; Apply / write mode writes clean results">
+    <input type="checkbox" id="applyMode"> write (apply)
+  </label>
+  <label class="toggle off" id="p4Toggle" title="Perforce: the target may be a //depot/... path; runs `p4 edit` before writing">
+    <input type="checkbox" id="p4"> p4
+  </label>
+  <button class="act" id="termBtn" hidden title="Show the Claude terminal for the last run">⌵ what's running</button>
 </header>
 
-<div class="wrap">
-  <div class="card">
-    <div class="tabs">
-      <button class="tab on" data-mode="paste">Paste a file &amp; patch</button>
-      <button class="tab" data-mode="fixture">Corpus fixtures</button>
-    </div>
+<!-- single-file input bar -->
+<div class="inputbar" id="barFile">
+  <label>target file</label><input id="file" spellcheck="false" placeholder="/path/to/source/file.c">
+  <label>patch</label><input id="patch1" spellcheck="false" placeholder="/path/to/fix.patch">
+  <button class="act pri" id="mergeBtn">Merge →</button>
+</div>
 
-    <div id="paste-pane">
-      <label>Target file name (used to pick the language / basename)</label>
-      <input type="text" id="fname" value="npu_driver.c" spellcheck="false">
-      <label>Target file content</label>
-      <textarea id="fcontent" spellcheck="false" placeholder="Paste the current source file here…"></textarea>
-      <label>Patch (unified diff — Qualcomm / MediaTek / LSI dialects)</label>
-      <textarea id="patch" spellcheck="false" placeholder="Paste the vendor patch here…"></textarea>
-      <button class="go" id="run-paste">Merge</button>
-      <div class="hint">The patch is applied in a scratch copy; nothing on disk is touched. Multi-file patches: use the fixtures tab or the CLI with <span style="font-family:var(--mono)">--root</span>.</div>
-    </div>
+<!-- folder input bar -->
+<div class="inputbar" id="barFolder" hidden>
+  <label>tree</label><input id="tree" spellcheck="false">
+  <label>patches</label><input id="patches" spellcheck="false">
+  <button class="act pri" id="loadBtn">Load</button>
+  <button class="act" id="runall">Run all →</button>
+</div>
 
-    <div id="fixture-pane" hidden>
-      <label>Corpus fixture</label>
-      <select id="fixsel"></select>
-      <button class="go" id="run-fixture">Run against bundled tree</button>
-      <div id="fixnote" class="hint"></div>
-    </div>
-  </div>
+<div class="warnbar" id="warn" hidden></div>
 
-  <div class="card">
-    <h2>Result</h2>
-    <div id="result"><div class="empty">Run a merge to see the report, the tier it landed at, and a coloured diff.</div></div>
+<div class="main" id="main">
+  <div class="list"><div class="bar"><span id="count"></span></div><div id="rows"></div></div>
+  <div class="view">
+    <iframe id="frame" hidden></iframe>
+    <div class="empty" id="empty">
+      <div class="big" id="emptyBig">Enter a target file and a patch, then Merge</div>
+      <div>Preview writes nothing. Turn on <b>AI-assist</b> for conflicts,<br>or <b>write (apply)</b> to land a clean patch.</div>
+    </div>
+    <div class="spin" id="spin"><div class="dot"></div><div class="msg" id="spinmsg">Merging…</div></div>
+    <div class="stream" id="stream">
+      <div class="term-bar">
+        <span class="term-dots"><i></i><i></i><i></i></span>
+        <span class="term-ttl">claude — patch-merger</span>
+        <span class="term-live" id="termLive"><span class="p"></span> <span id="termStatus">running</span></span>
+        <span class="term-x" id="termClose" title="close (report stays)">✕</span>
+      </div>
+      <div class="term-body" id="sBody"></div>
+    </div>
   </div>
 </div>
 
 <script>
 const $ = s => document.querySelector(s);
-const el = (t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!=null)e.textContent=txt;return e;};
+let PATCHES = [], selected = null, claudeOK = false, MODE = 'file';
 
-// ---- tab switching ----
-document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
-  document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on',x===t));
-  $('#paste-pane').hidden = t.dataset.mode!=='paste';
-  $('#fixture-pane').hidden = t.dataset.mode!=='fixture';
+async function jget(u){ return (await fetch(u)).json(); }
+async function jpost(u,b){ return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)})).json(); }
+
+(async function init(){
+  const c = await jget('/api/config');
+  $('#file').value = c.file || ''; $('#patch1').value = c.patch || '';
+  $('#tree').value = c.tree || ''; $('#patches').value = c.patches || '';
+  claudeOK = c.claude;
+  if(!claudeOK){ $('#assist').disabled = true;
+    $('#assistToggle').title = 'claude CLI not found on PATH — AI-assist unavailable'; }
+  if(!c.p4){ $('#p4').disabled = true;
+    $('#p4Toggle').title = 'p4 not found on PATH — enable it where Perforce is installed (your office)'; }
+  syncToggle();
+})();
+
+$('#assist').onchange = syncToggle;
+$('#p4').onchange = syncToggle;
+function syncToggle(){
+  $('#assistToggle').classList.toggle('off', !$('#assist').checked);
+  $('#p4Toggle').classList.toggle('off', !$('#p4').checked);
+}
+
+// mode switch
+document.querySelectorAll('.seg button').forEach(b=>b.onclick=()=>{
+  MODE = b.dataset.mode;
+  document.querySelectorAll('.seg button').forEach(x=>x.classList.toggle('on',x===b));
+  $('#barFile').hidden = MODE!=='file';
+  $('#barFolder').hidden = MODE!=='folder';
+  $('#main').classList.toggle('folder', MODE==='folder');
+  $('#emptyBig').textContent = MODE==='file'
+    ? 'Enter a target file and a patch, then Merge'
+    : 'Load a patches folder, then pick a patch';
 });
 
-// ---- fixtures dropdown ----
-async function loadFixtures(){
+function busy(on,msg){ $('#spin').classList.toggle('on',on); if(msg)$('#spinmsg').textContent=msg; }
+function showReport(html){ $('#empty').style.display='none'; const f=$('#frame'); f.hidden=false; f.srcdoc=html; }
+function spinMsg(){ return $('#assist').checked
+  ? 'Merging… (asking Claude to analyse & rebase — this can take a moment)' : 'Merging…'; }
+
+// ---- single file ----
+$('#mergeBtn').onclick = ()=>runFile($('#applyMode').checked);
+async function runFile(apply){
+  const file = $('#file').value.trim(), patch = $('#patch1').value.trim();
+  if(!file || !patch){ alert('Enter both a target file and a patch path.'); return; }
+  if($('#assist').checked) return streamMerge({patch_path:patch, file_path:file, apply});
+  busy(true, spinMsg());
   try{
-    const r = await fetch('/api/fixtures'); const j = await r.json();
-    const sel = $('#fixsel'); sel.innerHTML='';
-    if(!j.present || !j.fixtures.length){
-      $('#fixnote').innerHTML = 'No fixtures found at <span style="font-family:var(--mono)">'+j.dir+'</span>. Start the server with <span style="font-family:var(--mono)">--fixtures &lt;dir&gt;</span>.';
-      $('#run-fixture').disabled = true; return;
+    const res = await jpost('/api/run', {patch_path:patch, file_path:file, apply, assist:false, p4:$('#p4').checked});
+    if(res.error){ alert('Error: '+res.error); return; }
+    showReport(res.report_html);
+    if(res.p4) alert('p4:\n'+res.p4.join('\n'));
+  }finally{ busy(false); }
+}
+
+// ---- streaming (AI-assist): watch Claude work live in a terminal panel ----
+function streamPanel(on){ $('#stream').classList.toggle('on', on); }
+let curOut=null;
+function termCmd(cmd, comment){
+  const d=document.createElement('div'); d.className='term-cmd';
+  d.innerHTML=`<span class="pr">$</span> ${cmd}` + (comment?`   <span class="cm"># ${comment}</span>`:'');
+  $('#sBody').appendChild(d);
+}
+function termOut(){
+  if(curOut) curOut.classList.remove('active');
+  const p=document.createElement('div'); p.className='term-out active';
+  $('#sBody').appendChild(p); curOut=p; scrollTerm(); return p;
+}
+function termRes(text, cls){
+  if(curOut) curOut.classList.remove('active');
+  const d=document.createElement('div'); d.className='term-res '+(cls||'ok'); d.textContent=text;
+  $('#sBody').appendChild(d); scrollTerm();
+}
+function termInput(text){
+  const d=document.createElement('div'); d.className='term-in';
+  const cap=1800; const shown = text.length>cap ? text.slice(0,cap)+'\n… (+'+(text.length-cap)+' more chars of prompt sent to Claude)' : text;
+  d.textContent='┌─ stdin (prompt) ─\n'+shown; $('#sBody').appendChild(d); scrollTerm();
+}
+function termAppend(t){ if(curOut){ curOut.textContent+=t; scrollTerm(); } }
+function scrollTerm(){ const b=$('#sBody'); b.scrollTop=b.scrollHeight; }
+function termSetStatus(s, done){ $('#termStatus').textContent=s; $('#termLive').classList.toggle('done', !!done); }
+
+$('#termBtn').onclick=()=>streamPanel(true);
+$('#termClose').onclick=()=>streamPanel(false);
+
+function streamMerge(params){
+  $('#empty').style.display='none'; $('#frame').hidden=true;
+  $('#sBody').innerHTML=''; curOut=null; $('#termBtn').hidden=false;
+  termSetStatus('running', false); streamPanel(true);
+  const qs=new URLSearchParams({patch_path:params.patch_path, file_path:params.file_path,
+    apply:params.apply?'1':'0', assist:'1', p4:$('#p4').checked?'1':'0'}).toString();
+  const es=new EventSource('/api/run_stream?'+qs);
+  es.onmessage=(e)=>{
+    const o=JSON.parse(e.data);
+    if(o.phase==='merged'){
+      termCmd('patch-merger --file '+shortPath(params.file_path), 'deterministic merge');
+      const ai=(o.status==='needs-review'||o.status==='rejected');
+      termRes('→ '+o.status.toUpperCase()+(ai?'  — handing to Claude for analysis + rebase':'  — clean, no AI needed'), ai?'warn':'ok');
     }
-    j.fixtures.forEach(f=>{
-      const o=el('option');o.value=f.id;
-      o.textContent=`${f.filename}  ·  ${f.cve||'no CVE'}  ·  ${f.severity||''}`;
-      sel.appendChild(o);
-    });
-    $('#fixnote').textContent = j.fixtures.length+' fixtures loaded from the bundled corpus.';
-  }catch(e){ $('#fixnote').textContent='Could not load fixtures: '+e; }
+    else if(o.phase==='analyse'){
+      if(o.start){ termSetStatus('analysing…'); termCmd('claude -p --output-format stream-json --include-partial-messages','analyse the conflict'); if(o.prompt) termInput(o.prompt); termOut(); }
+      else if(o.delta){ termAppend(o.delta); }
+      else if(o.done){ termRes('✓ analysis complete — '+o.count+' blockers found','ok'); }
+    }
+    else if(o.phase==='rebase'){
+      if(o.start){ termSetStatus('rebasing…'); termCmd('claude -p --output-format stream-json --include-partial-messages','propose a rebase against the current code'); if(o.prompt) termInput(o.prompt); termOut(); }
+      else if(o.delta){ termAppend(o.delta); }
+      else if(o.done){ termRes(o.verified?'✓ rebase re-verified with git apply — applies cleanly':'✗ rebase did not verify — draft only', o.verified?'ok':'warn'); }
+    }
+    else if(o.phase==='p4'){
+      termCmd('p4 edit '+shortPath(params.file_path), 'open for edit in Perforce');
+      termRes((o.ok?'✓ ':'✗ ')+o.msg, o.ok?'ok':'warn');
+    }
+    else if(o.phase==='done'){
+      es.close(); termRes('✓ done — rendering the report','info'); termSetStatus('done', true);
+      setTimeout(()=>{ streamPanel(false); showReport(o.report_html); }, 900);
+    }
+    else if(o.phase==='error'){ es.close(); termRes('✗ error: '+o.error,'warn'); termSetStatus('error', true); }
+  };
+  es.onerror=()=>{ es.close(); if(!$('#frame').srcdoc){ termSetStatus('connection closed', true); } };
 }
-loadFixtures();
+function shortPath(p){ return (p||'').split('/').slice(-2).join('/'); }
 
-// ---- rendering ----
-function badge(status){
-  const b = el('span','badge b-'+status, ({applied:'APPLIED','no-op':'NO-OP (already present)','needs-review':'NEEDS REVIEW',rejected:'REJECTED'})[status]||status);
-  return b;
+// ---- folder ----
+$('#loadBtn').onclick = load;
+async function load(){
+  const r = await jpost('/api/patches', {patches:$('#patches').value, tree:$('#tree').value});
+  PATCHES = r.patches || []; selected=null;
+  $('#warn').hidden = r.tree_ok;
+  if(!r.tree_ok) $('#warn').textContent = 'Tree path not found — check the "tree" field.';
+  $('#count').textContent = PATCHES.length + ' patches';
+  renderRows();
 }
-function renderDiff(text){
-  const pre = el('pre','diff');
-  (text||'').split('\n').forEach(line=>{
-    let cls='';
-    if(line.startsWith('+++')||line.startsWith('---'))cls='d-head';
-    else if(line.startsWith('@@'))cls='d-hunk';
-    else if(line.startsWith('+'))cls='d-add';
-    else if(line.startsWith('-'))cls='d-del';
-    pre.appendChild(el('span','ln '+cls, line||' '));
-  });
-  return pre;
-}
-function render(report){
-  const R = $('#result'); R.innerHTML='';
-  if(report.error){ R.appendChild(el('div','warn','Error: '+report.error)); return; }
-
-  R.appendChild(badge(report.overall_status));
-
-  const md = report.metadata||{};
-  const meta = el('div','meta');
-  meta.innerHTML =
-    `<span>dialect <b>${report.dialect}</b> · strip <b>-p${report.strip}</b></span>`+
-    `<span>CVE <b>${md.cve||'—'}</b></span>`+
-    `<span>CR <b>${md.cr||'—'}</b></span>`+
-    `<span>severity <b>${md.severity||'—'}</b></span>`+
-    (md.component?`<span>component <b>${md.component}</b></span>`:'');
-  R.appendChild(meta);
-
-  if(report.safety && report.safety.passed===false){
-    const f = el('div','findings');
-    f.appendChild(el('b',null,'Safety scan rejected this patch before opening any file:'));
-    const ul=el('ul');
-    report.safety.findings.forEach(x=>ul.appendChild(el('li',null,x)));
-    f.appendChild(ul); R.appendChild(f);
-  }
-
-  // per-file table
-  const tbl = el('table');
-  tbl.innerHTML='<thead><tr><th>vendor path</th><th>resolved</th><th>lane</th><th>tier</th><th>status</th><th>verified</th></tr></thead>';
-  const tb = el('tbody');
-  (report.files||[]).forEach(fobj=>{
-    const tr=el('tr');
-    const tier = fobj.tier?('T'+fobj.tier+(fobj.fuzz?(' · fuzz '+fobj.fuzz):'')):'—';
-    tr.innerHTML =
-      `<td class="mono">${fobj.vendor_path||'—'}</td>`+
-      `<td class="mono">${fobj.resolved_path||'—'}</td>`+
-      `<td>${fobj.resolution_lane||'—'}</td>`+
-      `<td>${tier}</td>`+
-      `<td><span class="pill b-${fobj.status}">${fobj.status}</span></td>`+
-      `<td>${fobj.verified?'✓':'✗'}${fobj.line_ending?(' · '+fobj.line_ending):''}</td>`;
-    tb.appendChild(tr);
-  });
-  tbl.appendChild(tb); R.appendChild(tbl);
-
-  // per-file detail (reason + diff)
-  (report.files||[]).forEach(fobj=>{
-    const d=el('details'); if(fobj.status==='needs-review'||fobj.status==='rejected') d.open=true;
-    const sum=el('summary', null, (fobj.resolved_path||fobj.vendor_path||'file')+'  —  '+fobj.status);
-    d.appendChild(sum);
-    if(fobj.reason) d.appendChild(el('div','reason',fobj.reason));
-    if(fobj.diff) d.appendChild(renderDiff(fobj.diff));
-    else if(fobj.status!=='rejected'&&fobj.status!=='no-op') d.appendChild(el('div','reason','(no diff — nothing changed)'));
-    R.appendChild(d);
+function renderRows(){
+  const box=$('#rows'); box.innerHTML='';
+  PATCHES.forEach(p=>{
+    const d=document.createElement('div');
+    d.className='row'+(selected===p.filename?' sel':'');
+    d.innerHTML=`<div class="top"><span class="name" title="${p.filename}">${p.filename}</span>
+      <span class="badge b-${p.status||'none'}" data-badge="${p.id}">${p.status||'—'}</span></div>
+      <div class="meta">${p.cve||'no CVE'} · ${p.severity||''} · ${p.dialect}</div>
+      <div class="acts"><button data-preview="${p.filename}">Preview</button>
+      <button data-apply="${p.filename}">Apply</button></div>`;
+    box.appendChild(d);
   });
 }
-
-function busy(){ $('#result').innerHTML='<div class="spin">Merging…</div>'; }
-
-async function post(url,body){
-  const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  return r.json();
-}
-
-$('#run-paste').onclick = async ()=>{
-  busy();
+async function runFolder(filename, apply){
+  const p=PATCHES.find(x=>x.filename===filename); selected=filename; renderRows();
+  busy(true, spinMsg());
   try{
-    const rep = await post('/api/merge',{
-      patch: $('#patch').value,
-      file_name: $('#fname').value,
-      file_content: $('#fcontent').value,
-    });
-    render(rep);
-  }catch(e){ render({error:String(e)}); }
-};
-
-$('#run-fixture').onclick = async ()=>{
-  busy();
+    const res=await jpost('/api/run',{patch_path:$('#patches').value.replace(/\/+$/,'')+'/'+filename,
+      tree:$('#tree').value, apply, assist:$('#assist').checked});
+    if(res.error){ alert('Error: '+res.error); return; }
+    p.status=res.status; const b=document.querySelector(`[data-badge="${p.id}"]`);
+    if(b){ b.className='badge b-'+res.status; b.textContent=res.status; }
+    showReport(res.report_html);
+  }finally{ busy(false); }
+}
+$('#rows').addEventListener('click', e=>{
+  const pv=e.target.closest('[data-preview]'), ap=e.target.closest('[data-apply]'), row=e.target.closest('.row');
+  if(pv) return runFolder(pv.dataset.preview,false);
+  if(ap) return runFolder(ap.dataset.apply,true);
+  if(row) return runFolder(row.querySelector('.name').title,false);
+});
+$('#runall').onclick = async ()=>{
+  busy(true, $('#assist').checked?'Running all… (Claude assists on conflicts)':'Running all…');
   try{
-    const rep = await post('/api/run_fixture',{ id: $('#fixsel').value });
-    render(rep);
-  }catch(e){ render({error:String(e)}); }
+    const res=await jpost('/api/batch',{patches:$('#patches').value,tree:$('#tree').value,
+      apply:$('#applyMode').checked, assist:$('#assist').checked});
+    if(res.error){ alert('Error: '+res.error); return; }
+    (res.rows||[]).forEach(r=>{const p=PATCHES.find(x=>x.id===r.id); if(p)p.status=r.status;});
+    renderRows(); showReport(res.summary_html); selected=null;
+  }finally{ busy(false); }
 };
 </script>
 </body>

@@ -994,10 +994,11 @@ def main(argv=None):
     return exit_map.get(report["overall_status"], 1)
 
 
-def render_review(report, writes, patch_text, root, findings=None):
+def render_review(report, writes, patch_text, root, findings=None, assist=None):
     """Build the per-file payload (current / merged / incoming) for the 3-way
     conflict view and return the rendered HTML page. Reusable by the CLI and by
-    batch mode. If findings is None, auto-detected blockers are used."""
+    batch mode. If findings is None, auto-detected blockers are used. `assist`
+    is an optional AI-rebase section (see claude_merge.py)."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import review
 
@@ -1030,7 +1031,7 @@ def render_review(report, writes, patch_text, root, findings=None):
 
     if findings is None:
         findings = _auto_findings(report, patch_text, root) or None
-    return review.render(report, payload=payload, findings=findings)
+    return review.render(report, payload=payload, findings=findings, assist=assist)
 
 
 def _write_review(report, writes, patch_text, root, args):

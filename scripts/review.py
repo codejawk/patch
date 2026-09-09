@@ -49,30 +49,43 @@ def _esc(s):
 # --------------------------------------------------------------------------- #
 
 
+_GAP = [0]  # unique id source for collapsible regions
+
+
 def _sxs(before_text, after_text):
     before = (before_text or "").split("\n")
     after = (after_text or "").split("\n")
     sm = difflib.SequenceMatcher(None, before, after, autojunk=False)
 
-    def cell(num, text, cls):
-        return (f'<div class="lno {cls}">{num if num is not None else ""}</div>'
-                f'<div class="code {cls}">{_esc(text)}</div>')
+    def cell(num, text, cls, attr=""):
+        return (f'<div class="lno {cls}"{attr}>{num if num is not None else ""}</div>'
+                f'<div class="code {cls}"{attr}>{_esc(text)}</div>')
 
     rows = ['<div class="sxs-h left">Before — your tree</div>'
             '<div class="sxs-h right">After — merged</div>']
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag == "equal":
             n = i2 - i1
-            show = set(range(3)) | set(range(n - 3, n)) if n > 6 else set(range(n))
-            gapped = False
-            for k in range(n):
-                if k in show:
+            if n <= 6:
+                for k in range(n):
                     rows.append(cell(i1 + k + 1, before[i1 + k], "")
                                 + cell(j1 + k + 1, after[j1 + k], ""))
-                    gapped = False
-                elif not gapped:
-                    rows.append(f'<div class="gap">&#8230; {n - 6} unchanged lines &#8230;</div>')
-                    gapped = True
+                continue
+            # collapse the middle: 3 shown, a clickable divider, hidden lines, 3 shown
+            _GAP[0] += 1
+            gid = _GAP[0]
+            label = f"&#9662; {n - 6} unchanged lines — click to expand"
+            for k in range(3):
+                rows.append(cell(i1 + k + 1, before[i1 + k], "")
+                            + cell(j1 + k + 1, after[j1 + k], ""))
+            rows.append(f'<div class="gap" data-g="{gid}" '
+                        f'data-label="{label}">{label}</div>')
+            for k in range(3, n - 3):
+                rows.append(cell(i1 + k + 1, before[i1 + k], "xr", f' data-g="{gid}"')
+                            + cell(j1 + k + 1, after[j1 + k], "xr", f' data-g="{gid}"'))
+            for k in range(n - 3, n):
+                rows.append(cell(i1 + k + 1, before[i1 + k], "")
+                            + cell(j1 + k + 1, after[j1 + k], ""))
         elif tag == "replace":
             L, R = before[i1:i2], after[j1:j2]
             for k in range(max(len(L), len(R))):
@@ -107,7 +120,7 @@ def _patch_html(patch_text):
 # --------------------------------------------------------------------------- #
 
 
-def render(report, payload=None, findings=None):
+def render(report, payload=None, findings=None, assist=None):
     payload = payload or {}
     status = report.get("overall_status", "rejected")
     label, role, blurb = STATUS.get(status, STATUS["rejected"])
@@ -135,6 +148,10 @@ def render(report, payload=None, findings=None):
         safety_html = ('<div class="banner danger"><b>Refused by the safety scan '
                        '— no file was opened.</b><ul>' + items + "</ul></div>")
 
+    # If Claude produced a verified rebase, that IS the answer — so the blockers
+    # (which only explain why the *original* patch couldn't be trusted) collapse
+    # to a one-line summary the reader can expand if they want the audit trail.
+    verified_fix = bool(assist and assist.get("diff") and assist.get("verified"))
     findings_html = ""
     if findings:
         cards = "".join(
@@ -143,8 +160,14 @@ def render(report, payload=None, findings=None):
             f'<h3>{_esc(f.get("title",""))}</h3><p>{_esc(f.get("body",""))}</p>'
             + (f'<div class="ev">{_esc(f.get("evidence"))}</div>' if f.get("evidence") else "")
             + "</div></div>" for i, f in enumerate(findings, 1))
-        findings_html = ('<section><span class="eyebrow">Blockers found</span>'
-                         '<h2>Problems to clear before this ships</h2>' + cards + "</section>")
+        if verified_fix:
+            findings_html = (
+                f'<details class="whyblock"><summary>Why the original patch '
+                f"couldn't land — {len(findings)} findings (the rebase above already "
+                f'clears them)</summary>{cards}</details>')
+        else:
+            findings_html = ('<section><span class="eyebrow">Blockers found</span>'
+                             '<h2>Problems to clear before this ships</h2>' + cards + "</section>")
 
     merged_map = {}
     files_html = []
@@ -191,6 +214,24 @@ def render(report, payload=None, findings=None):
 
         files_html.append('<div class="file">' + "".join(parts) + "</div>")
 
+    assist_html = ""
+    if assist and assist.get("diff"):
+        ok = assist.get("verified")
+        badge = ('<span class="a-badge ok">✓ verified — applies cleanly (T'
+                 f'{assist.get("tier", 1)})</span>' if ok else
+                 '<span class="a-badge bad">✗ not verified — this rebase did not '
+                 'apply; treat as a draft only</span>')
+        assist_html = (
+            '<section><span class="eyebrow">AI-assisted rebase (Claude)</span>'
+            '<h2>Proposed rebase against the current code</h2>'
+            '<div class="assist"><div class="a-head">' + badge +
+            '<span class="a-note">Generated by Claude for review — never '
+            'auto-applied. Confirm it before shipping.</span></div>'
+            + _patch_html(assist["diff"])
+            + (f'<div class="a-why">{_esc(assist.get("note"))}</div>'
+               if assist.get("note") else "")
+            + '</div></section>')
+
     data = json.dumps(merged_map).replace("</", "<\\/")
     return _head(md.get("cve") or "Patch review") + f'''
   <div class="wrap">
@@ -201,11 +242,12 @@ def render(report, payload=None, findings=None):
         <div class="chips">{chip_html}</div></div>
     </div>
     {safety_html}
-    {findings_html}
+    {assist_html}
     <section><span class="eyebrow">The changes</span>
       <h2>Before &nbsp;·&nbsp; After &nbsp;·&nbsp; the patch</h2>
       {"".join(files_html)}
     </section>
+    {findings_html}
     <div class="prov">generated by the patch-merger skill</div>
   </div>
   <div class="toast" id="toast"></div>
@@ -219,6 +261,10 @@ const M = JSON.parse(document.getElementById('merged-data').textContent);
 function toast(m){const t=document.getElementById('toast');t.textContent=m;
   t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1400);}
 document.addEventListener('click',e=>{
+  const g=e.target.closest('.gap[data-g]');
+  if(g){ const id=g.dataset.g, open=g.classList.toggle('open');
+    document.querySelectorAll('.xr[data-g="'+id+'"]').forEach(x=>x.style.display=open?'block':'');
+    g.innerHTML = open ? '&#9652; hide unchanged lines' : g.dataset.label; return; }
   const c=e.target.closest('[data-copy]'), d=e.target.closest('[data-dl]');
   if(c){navigator.clipboard.writeText(M[c.dataset.copy]||'')
       .then(()=>toast('Merged file copied')).catch(()=>toast('Copy failed'));}
@@ -323,7 +369,11 @@ _CSS = """
   .lno.add{background:var(--add-gut);color:var(--add-ink)} .code.add{background:var(--add-bg);color:var(--add-ink)}
   .code:nth-child(4n+2){border-right:1px solid var(--line)}
   .gap{grid-column:1/-1;background:var(--code-bg);color:var(--faint);text-align:center;
-    font-size:11px;padding:3px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+    font-size:11px;padding:5px;border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+    cursor:pointer;user-select:none;font-family:var(--mono)}
+  .gap:hover{color:var(--accent);background:var(--accent-bg)}
+  .gap.open{color:var(--accent)}
+  .xr{display:none}
   .bar{display:flex;align-items:center;justify-content:space-between;gap:12px;
     padding:10px 16px;background:var(--surface-2);flex-wrap:wrap}
   .bar .hint{font-size:12.5px;color:var(--muted)}
@@ -354,6 +404,24 @@ _CSS = """
   .s-info,.s-note{color:var(--accent);background:var(--accent-bg);border:1px solid var(--accent-line)}
   .ev{margin-top:10px;background:var(--code-bg);border:1px solid var(--line);border-radius:8px;
     padding:9px 12px;font-family:var(--mono);font-size:12px;color:var(--muted);overflow-x:auto;white-space:pre}
+  .assist{margin-top:12px;background:var(--surface);border:1px solid var(--accent-line);
+    border-radius:12px;overflow:hidden}
+  .a-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;
+    background:var(--accent-bg);border-bottom:1px solid var(--accent-line)}
+  .a-badge{font-family:var(--mono);font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px}
+  .a-badge.ok{color:var(--good);background:var(--good-bg);border:1px solid var(--good-line)}
+  .a-badge.bad{color:var(--danger);background:var(--danger-bg);border:1px solid var(--danger-line)}
+  .a-note{font-size:12.5px;color:var(--muted)}
+  .a-why{padding:12px 16px;font-size:14px;color:var(--ink);border-top:1px solid var(--line)}
+  .whyblock{margin-top:26px;border:1px solid var(--line);border-radius:12px;background:var(--surface);overflow:hidden}
+  .whyblock>summary{cursor:pointer;padding:13px 18px;font-size:13px;font-weight:600;color:var(--muted);
+    list-style:none;background:var(--surface-2)}
+  .whyblock>summary::-webkit-details-marker{display:none}
+  .whyblock>summary::before{content:'▸ ';color:var(--faint)}
+  .whyblock[open]>summary::before{content:'▾ '}
+  .whyblock .defect:first-of-type{margin-top:14px}
+  .whyblock .defect{margin-left:16px;margin-right:16px}
+  .whyblock .defect:last-child{margin-bottom:16px}
   .prov{margin-top:40px;border-top:1px solid var(--line);padding-top:15px;
     font-family:var(--mono);font-size:12px;color:var(--faint)}
   .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);
