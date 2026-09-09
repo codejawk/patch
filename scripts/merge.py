@@ -1034,8 +1034,12 @@ def render_review(report, writes, patch_text, root, findings=None):
 
 
 def _write_review(report, writes, patch_text, root, args):
-    """CLI wrapper: render the review page, write it to disk, return its path."""
-    import tempfile
+    """CLI wrapper: render the review page, write it to disk, return its path.
+
+    A report is written for EVERY outcome (applied / no-op / needs-review /
+    rejected). When --html is not given, it lands in a predictable
+    ``patch-reports/`` folder next to the tree, named after the patch, instead
+    of a throwaway temp file — so it is always easy to find and reopen."""
     findings = None
     if args.findings:
         with open(args.findings, encoding="utf-8") as fh:
@@ -1043,9 +1047,14 @@ def _write_review(report, writes, patch_text, root, args):
     page = render_review(report, writes, patch_text, root, findings=findings)
 
     path = args.html
-    if not path:  # --html with no path, or default run
-        fd, path = tempfile.mkstemp(prefix="patch-review-", suffix=".html")
-        os.close(fd)
+    if not path:  # default run: stable, discoverable location
+        base = os.path.dirname(root) if args.root else root
+        rdir = os.path.join(base or ".", "patch-reports")
+        os.makedirs(rdir, exist_ok=True)
+        stem = os.path.splitext(os.path.basename(args.patch))[0]
+        path = os.path.join(rdir, stem + ".html")
+    else:
+        os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(page)
     return path

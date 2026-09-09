@@ -95,6 +95,35 @@ not just reads a status line. In this Claude Code session, also open the
 generated page in the Browser pane (its path is printed as `review page: …`), so
 it surfaces even when the system browser doesn't.
 
+### A report for every outcome — always
+
+Every normal run writes a report **for every outcome** — applied, no-op,
+needs-review, and rejected alike. With no `--html`, it lands in a predictable,
+discoverable folder next to the tree and is named after the patch:
+
+```
+<parent of tree>/patch-reports/<patch-name>.html
+```
+
+(For `--file`, it's `<file's dir>/patch-reports/…`.) So the user can always find
+and reopen it; you don't need to pass `--html`.
+
+When the user wants you to actually merge (not just preview), run `--in-place`.
+The report is rendered from the pre-patch file *before* the write, so a single
+run both applies the change **and** shows the Before/After that confirms it:
+
+```bash
+python3 scripts/merge.py <patch> --root <tree> --in-place
+```
+
+Then tell the user the outcome in one line, taken from the report: the status
+(applied / no-op / needs-review / rejected), the file(s) touched, and the tier —
+e.g. "Applied cleanly (T1) to npu_driver.c — report: <path>". That report *is*
+the confirmation; don't claim success without pointing at it. Note that once a
+patch is applied, re-running it reports `no-op` with nothing to diff — so to
+show what a patch did *after* it was applied, render the report against a
+pre-patch copy of the tree.
+
 For a `needs-review` (or `rejected`) result, enrich the page: once you've read
 the landing region (workflow step 2) and worked out the concrete defects, write
 them to a small JSON file and regenerate the page so those defects render as
